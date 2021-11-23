@@ -1,14 +1,14 @@
 from transformers import pipeline
+
 from wilds import get_dataset
-from wilds.common.data_loaders import get_train_loader
-from wilds.wilds.common.data_loaders import get_eval_loader
+from wilds.common.data_loaders import get_eval_loader, get_train_loader
 
-DATASET = 'civilcomments'
+DATASET = "civilcomments"
 
-TRAIN_SPLIT = 'train'
-EVAL_SPLIT = 'eval'
+TRAIN_SPLIT = "train"
+VAL_SPLIT = "val"
 
-STANDARD_LOADER = 'standard'
+STANDARD_LOADER = "standard"
 
 dataset = get_dataset(dataset=DATASET, download=False)
 
@@ -18,11 +18,11 @@ for x, y_true, metadata in train_loader:
     print(f"{x}, {y_true}, {metadata}")
     # TODO(pooja): Train the model!
 
-eval_data = dataset.get_subset(EVAL_SPLIT, frac=1.0)
-eval_loader = get_eval_loader(STANDARD_LOADER, eval_data, batch_size=100)
+val_data = dataset.get_subset(VAL_SPLIT, frac=1.0)
+val_loader = get_eval_loader(STANDARD_LOADER, val_data, batch_size=100)
 # TODO(pooja): Write sampling strategies.
 
 # Get model predictions
-classifier = pipeline('sentiment-analysis')
+classifier = pipeline("sentiment-analysis")
 prediction = classifier("Wow, using HuggingFace is easy")
 print(prediction)
