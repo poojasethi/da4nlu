@@ -1,0 +1,4 @@
+[submodule "wilds"]
+	path = wilds
+	url = git@github.com:p-lambda/wilds.git
+	ignore = dirty
