@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "./wilds"
+    ],
+    "python.formatting.provider": "black"
+}
