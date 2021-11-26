@@ -2,3 +2,4 @@ tex/
 data/
 tags
 .ctrlp
+__pycache__/
