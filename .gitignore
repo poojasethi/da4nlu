@@ -3,3 +3,4 @@ data/
 tags
 .ctrlp
 __pycache__/
+.vscode
