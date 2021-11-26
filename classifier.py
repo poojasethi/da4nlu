@@ -2,14 +2,13 @@ import argparse
 import logging
 import os
 import sys
-from re import I
 from enum import Enum
-from typing import Any, List, Tuple, Dict
-from numpy.random.mtrand import sample
-import torch
-import pandas as pd
+from re import I
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
+import torch
 from joblib import dump, load
 from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import SGDClassifier
@@ -17,8 +16,17 @@ from tqdm import tqdm
 
 from utils import timed
 from wilds import get_dataset
-from wilds.common.data_loaders import DataLoader, get_eval_loader, get_train_loader
+from wilds.common.data_loaders import (DataLoader, get_eval_loader,
+                                       get_train_loader)
 from wilds.datasets.wilds_dataset import WILDSDataset
+
+
+"""
+This script trains a binary classification model on the Civil Comments WILDS dataset.
+It trains an initial "seed" model, then tries to improve the model in an online setting,
+by either sampling using self-learning, uncertainty-based active learning, or one of 
+the other sampling strategies defined here.
+"""
 
 logger = logging.getLogger()
 logger.addHandler(logging.StreamHandler(sys.stdout))
@@ -46,7 +54,7 @@ PENALTY = "l2"
 MAX_TRAINING_ITER = 5
 NUM_SAMPLING_ITER = 5
 
-X_Y_Metadata = Tuple[List[List[float]], List[int], List[List[int]]]
+X_Y_Metadata_Sentences = Tuple[List[List[float]], List[int], List[List[int]], Optional[List[str]]]
 
 
 def main():
@@ -56,17 +64,18 @@ def main():
     logger.info("Preparing training data...")
     train_data = dataset.get_subset(TRAIN_SPLIT, frac=config.frac)
     train_loader = get_train_loader(LOADER, train_data, batch_size=config.batch_size)
-    X_train, Y_train, X_train_metadata = prepare_data(train_loader)
+    X_train, Y_train, X_train_metadata, X_train_sentences = prepare_data(train_loader)
 
     logger.info("Preparing test data...")
     test_data = dataset.get_subset(TEST_SPLIT, frac=config.frac)
     test_loader = get_eval_loader(LOADER, test_data, batch_size=config.batch_size)
-    X_test, Y_test, X_test_metadata = prepare_data(test_loader)
+    X_test, Y_test, X_test_metadata, X_test_sentences = prepare_data(test_loader)
+    test_data = (X_test, Y_test, X_test_metadata, X_test_sentences)
 
     # Initialize the "seed" model that we will use for our sampling experiments.
     iteration = 0
-    model_path = f"{config.output_dir}/{iteration}/model_{len(X_train)}.joblib"
-    results_path = f"{config.output_dir}/{iteration}/results_{len(X_train)}.txt"
+    model_path = f"{config.output_dir}/{iteration}/model.joblib"
+    results_path = f"{config.output_dir}/{iteration}/results.txt"
     if os.path.exists(model_path):
         logger.info(
             f"Already found a model trained with {len(X_train)} samples at {model_path}, skipping training!"
@@ -78,7 +87,13 @@ def main():
         clf.predict(X_train)
         save_model(clf, model_path)
         save_results(
-            clf, results_path, {"train": (X_train, Y_train, X_train_metadata), "test": (X_test, Y_test, X_test_metadata)}, dataset
+            clf,
+            results_path,
+            {
+                "train": (X_train, Y_train, X_train_metadata, X_train_sentences),
+                "test": (X_test, Y_test, X_test_metadata, X_test_sentences),
+            },
+            dataset,
         )
 
     # Perform online sampling and retraining.
@@ -98,44 +113,42 @@ def sample_data_and_retrain(
     sampling_frac: float,
     batch_size: int,
     output_dir: str,
-    test_data: X_Y_Metadata,
+    test_data: X_Y_Metadata_Sentences,
 ):
     for i in range(1, 1 + NUM_SAMPLING_ITER):
         logger.info(f"Starting round {i} of model training...")
 
         # The validation set is our candidate pool of unlabeled data for sampling.
-        logger.info("Preparing validation data for sampling...")
-        val_data = dataset.get_subset(VAL_SPLIT, frac=frac, shuffle=True)
+        logger.info("Preparing validation data (candidate pool) for sampling...")
+        val_data = dataset.get_subset(VAL_SPLIT, frac=frac)
         val_loader = get_eval_loader(LOADER, val_data, batch_size=batch_size)
-        X_val, Y_val, X_val_metadata = prepare_data(val_loader)
+        X_val, Y_val, X_val_metadata, X_val_sentences = prepare_data(val_loader)
         candidate_pool = pd.DataFrame(
-            {"X": X_val, "Y": Y_val, "X_metadata": X_val_metadata}
+            {"X": X_val, "Y": Y_val, "X_metadata": X_val_metadata, "X_sentences": X_val_sentences}
         )
 
-        for strategy in [s.value for s in SamplingStrategy]:
-            logger.info(f"Running sampling strategy: {strategy}...")
-            candidate_pool_size = len(candidate_pool)
-            model_path = (
-                f"{output_dir}/{i}/{strategy}/model_{candidate_pool_size}.joblib"
-            )
-            results_path = (
-                f"{output_dir}/{i}/{strategy}/results_{candidate_pool_size}.txt"
-            )
-            if os.path.exists(model_path):
+        for strategy in SamplingStrategy:
+            logger.info(f"Running sampling strategy {strategy}...")
+            model_path = f"{output_dir}/{i}/{strategy.value}/model.joblib"
+            results_path = f"{output_dir}/{i}/{strategy.value}/results.txt"
+            data_path = f"{output_dir}/{i}/{strategy.value}/data.csv"
+
+            if os.path.exists(model_path) and os.path.exists(results_path):
                 logger.info(
-                    f"Already found a model trained with {candidate_pool_size} samples at {model_path}, skipping training!"
+                    f"Already found a model trained at {model_path} and results saved at {results_path} -- skipping training!"
                 )
             else:
+                os.makedirs(os.path.dirname(model_path), exist_ok=True)
+
                 previous_model_path = (
-                    f"{output_dir}/{i - 1}/model_{candidate_pool_size}.joblib"
+                    f"{output_dir}/{i - 1}/model.joblib"
                     if i == 1
-                    else f"{output_dir}/{i - 1}/{strategy}/model_{candidate_pool_size}.joblib"
+                    else f"{output_dir}/{i - 1}/{strategy.value}/model.joblib"
                 )
 
                 clf, sampled_data = run_sampling_strategy(
-                    strategy, candidate_pool, sampling_frac, previous_model_path
+                    strategy, candidate_pool, sampling_frac, previous_model_path, data_path
                 )
-                # Pass in test sets here.
                 save_model(clf, model_path)
                 save_results(
                     clf,
@@ -147,58 +160,72 @@ def sample_data_and_retrain(
 
 @timed
 def run_sampling_strategy(
-    strategy: str,
+    strategy: SamplingStrategy,
     candidate_pool: pd.DataFrame,
     sampling_frac: float,
     previous_model_path: str,
-) -> Tuple[SGDClassifier, X_Y_Metadata]:
-    logger.info(f"Loading and retraining model from {previous_model_path}")
+    data_path: str,
+) -> Tuple[SGDClassifier, X_Y_Metadata_Sentences]:
+    logger.info(f"Loading model from {previous_model_path}...")
     clf = load(previous_model_path)
-    sampled_data = sample_data(candidate_pool, strategy, sampling_frac, clf)
+    sampled_data = sample_data(candidate_pool, strategy, sampling_frac, clf, data_path)
 
-    X_sampled, Y_sampled, X_sampled_metadata = (
+    X_sampled, Y_sampled, X_sampled_metadata, X_sentences = (
         sampled_data["X"],
         sampled_data["Y"],
         sampled_data["X_metadata"],
+        sampled_data["X_sentences"]
     )
+    X_sampled, Y_sampled, X_sampled_metadata = X_sampled.tolist(), Y_sampled.tolist(), X_sampled_metadata.tolist()
     clf.partial_fit(X_sampled, Y_sampled)
-    return clf, (X_sampled, Y_sampled, X_sampled_metadata)
+    return clf, (X_sampled, Y_sampled, X_sampled_metadata, X_sentences)
 
 
 @timed
 def sample_data(
     candidate_pool: pd.DataFrame,
-    strategy: str,
+    strategy: SamplingStrategy,
     sampling_frac: float,
     clf: SGDClassifier,
+    data_path: str,
+    write_data: bool=True,
 ) -> pd.DataFrame:
     if strategy == SamplingStrategy.RANDOM:
         return candidate_pool.sample(frac=sampling_frac)
     else:
-        sampled_data = candidate_pool
-        sampled_data["Y_predict"] = clf.predict(candidate_pool["X"])
-        sampled_data["Y_decision"] = clf.decision_function(candidate_pool["X"])
-        sampled_data["Y_confidence"] = abs(sampled_data["Y_decision"])
+        candidate_info = candidate_pool.copy(deep=True)
+        X = candidate_pool["X"].tolist()
+        candidate_info["Y_predict"] = clf.predict(X)
+        candidate_info["Y_decision"] = clf.decision_function(X)
+        candidate_info["Y_confidence"] = abs(candidate_info["Y_decision"])
 
         # Sort the sampled data by confidence in descending order (high confidence is at the top).
-        sampled_data.sort_values("Y_confidence", ascending=False, inplace=True)
+        candidate_info.sort_values("Y_confidence", ascending=False, inplace=True)
 
-        num_to_sample = len(candidate_pool) * sampling_frac
+        num_to_sample = int(len(candidate_pool) * sampling_frac)
         if strategy == SamplingStrategy.HYBRID:
-            head = sampled_data.head(n=(num_to_sample / 2))
-            tail = sampled_data.tail(n=(num_to_sample / 2))
+            head = candidate_info.head(n=(num_to_sample // 2)).copy(deep=True)
+            tail = candidate_info.tail(n=(num_to_sample // 2)).copy(deep=True)
             head["Y"] = head["Y_predict"]
-            return pd.concact([head, tail], axis=1)
-        else:
+            sampled_data = pd.concat([head, tail])
+        else: 
+            # Return sampled data.
+            if is_high_confidence_strategy(strategy):
+                sampled_data = candidate_info.head(n=num_to_sample).copy(deep=True)
+            else:
+                sampled_data = candidate_info.tail(n=num_to_sample).copy(deep=True)
+            
             # For self-learning, replace the gold label with the model prediction.
             if is_self_learning_strategy(strategy):
                 sampled_data["Y"] = sampled_data["Y_predict"]
 
-            # Return sampled data.
-            if is_high_confidence_strategy(strategy):
-                return sampled_data.head(n=num_to_sample)
-            else:
-                return sampled_data.tail(n=num_to_sample)
+
+        examples = sampled_data[["X_sentences", "Y", "Y_decision", "Y_confidence"]]
+        logger.info(f"Sampled some data! Here are some examples:\n {examples.head(n=10)}")
+        if write_data:
+            examples.to_csv(data_path)
+
+        return sampled_data
 
 
 def is_self_learning_strategy(strategy):
@@ -216,25 +243,24 @@ def is_high_confidence_strategy(strategy):
 
 
 @timed
-def prepare_data(data_loader: DataLoader, embed_input: bool = True) -> X_Y_Metadata:
-    X = []
+def prepare_data(data_loader: DataLoader, embed_input: bool = True) -> X_Y_Metadata_Sentences:
+    X_sentences = []
     Y = []
     X_metadata = []
     for x, y_true, metadata in data_loader:
         # Use "extend" because the data loader returns batch_size points at a time.
-        X.extend(x)
+        X_sentences.extend(x)
         Y.extend(y_true)
         X_metadata.extend(metadata)
 
-    # Extract labels from tensors
-    # Note: Need to use mLabelEncoder here if we need to transform multi-class.
+    # Conver tensors to Python lists.
     Y = [y.item() for y in Y]
-
+    X_metadata = [m.tolist() for m in X_metadata]
     if embed_input:
-        X = embed_text(X)
+        X = embed_text(X_sentences).tolist()
 
     logger.info(f"Prepared {len(X)} examples")
-    return X, Y, X_metadata
+    return X, Y, X_metadata, X_sentences
 
 
 def embed_text(X: List[str]) -> List[List[float]]:
@@ -246,7 +272,6 @@ def save_model(
     clf: SGDClassifier,
     model_path: str,
 ) -> None:
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     logging.info(f"Saving model path to: {model_path}")
     dump(clf, model_path)
 
@@ -254,9 +279,10 @@ def save_model(
 def save_results(
     clf: SGDClassifier,
     results_path: str,
-    eval_sets: Dict[str, X_Y_Metadata],
+    eval_sets: Dict[str, X_Y_Metadata_Sentences],
     dataset: WILDSDataset,
 ) -> None:
+    breakpoint()
     for name, data in eval_sets.items():
         calculate_and_save_accuracy(clf, results_path, name, data, dataset)
 
@@ -265,17 +291,17 @@ def calculate_and_save_accuracy(
     clf: SGDClassifier,
     results_path: str,
     name: str,
-    eval_data: X_Y_Metadata,
+    eval_data: X_Y_Metadata_Sentences,
     dataset: WILDSDataset,
 ) -> None:
-    X_eval, Y_eval, X_eval_metadata = eval_data
+    X_eval, Y_eval, X_eval_metadata, _ = eval_data
     # Note: Because we do not necessarily need a calibrated probability but just a
     # confidence score, calling predict here should be ok.
     Y_predict_np_array = clf.predict(X_eval)
 
     Y_predict_tensor = torch.from_numpy(Y_predict_np_array)
     Y_eval_tensor = torch.tensor(Y_eval)
-    X_eval_metadata_tensor = torch.stack(X_eval_metadata)
+    X_eval_metadata_tensor = torch.stack([torch.tensor(x) for x in X_eval_metadata])
 
     _, results_str = dataset.eval(
         Y_predict_tensor, Y_eval_tensor, X_eval_metadata_tensor
@@ -285,7 +311,7 @@ def calculate_and_save_accuracy(
     os.makedirs(os.path.dirname(results_path), exist_ok=True)
     logging.info(f"Saving results to: {results_path}")
     with open(results_path, mode="a") as fh:
-        fh.write(f"Results for: {name}")
+        fh.write(f"Results for: {name}\n")
         fh.write(results_str)
         fh.write(f"{'*' * 30}\n")
 
