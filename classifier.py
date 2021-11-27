@@ -20,6 +20,7 @@ from wilds.common.data_loaders import DataLoader, get_eval_loader, get_train_loa
 from wilds.datasets.wilds_dataset import WILDSDataset
 
 import matplotlib.pyplot as plt
+from dataclasses import dataclass
 
 """
 This script trains a binary classification model on the Civil Comments WILDS dataset.
@@ -42,6 +43,9 @@ class SamplingStrategy(Enum):
     LOW_CONFIDENCE_USE_PREDICTION = "low_confidence_use_prediction"
 
 
+# Number of rounds of sampling to perform
+NUM_SAMPLING_ITER = 5
+
 SBERT_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 TRAIN_SPLIT = "train"
@@ -49,10 +53,14 @@ VAL_SPLIT = "val"
 TEST_SPLIT = "test"
 LOADER = "standard"
 
-LOSS = "hinge"
-PENALTY = "l2"
-MAX_TRAINING_ITER = 10 
-NUM_SAMPLING_ITER = 5
+
+@dataclass
+class Hyperparameters:
+    loss = "hinge"
+    max_training_iter = 10
+    penalty = "elasticnet"
+    class_weight = "balanced"
+
 
 X_Y_Metadata_Sentences = Tuple[
     List[List[float]], List[int], List[List[int]], Optional[List[str]]
@@ -60,6 +68,7 @@ X_Y_Metadata_Sentences = Tuple[
 
 TRAIN_RESULTS = {s.value: {} for s in SamplingStrategy}
 TEST_RESULTS = {s.value: {} for s in SamplingStrategy}
+
 
 @timed
 def main():
@@ -87,7 +96,12 @@ def main():
         )
     else:
         logger.info(f"Starting round {iteration} of model training...")
-        clf = SGDClassifier(loss=LOSS, penalty=PENALTY, max_iter=MAX_TRAINING_ITER)
+        clf = SGDClassifier(
+            loss=Hyperparameters.loss,
+            max_iter=Hyperparameters.max_training_iter,
+            penalty=Hyperparameters.penalty,
+            class_weight=Hyperparameters.class_weight,
+        )
         clf.fit(X_train, Y_train)
         clf.predict(X_train)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -116,6 +130,7 @@ def main():
         config.sampling_frac,
         config.batch_size,
         config.output_dir,
+        config.num_sample_iter,
         test_data,
     )
 
@@ -131,9 +146,10 @@ def sample_data_and_retrain(
     sampling_frac: float,
     batch_size: int,
     output_dir: str,
+    num_sampling_iter: int,
     test_data: X_Y_Metadata_Sentences,
 ):
-    for i in range(1, 1 + NUM_SAMPLING_ITER):
+    for i in range(1, 1 + num_sampling_iter):
         logger.info(f"Starting round {i} of model training...")
 
         # The validation set is our candidate pool of unlabeled data for sampling.
@@ -404,6 +420,13 @@ def get_config():
         "--output-dir",
         default="results",
         help="The directory to output model results to.",
+    )
+    parser.add_argument(
+        "-n",
+        "--num-sampling-iter",
+        type=int,
+        default=5,
+        help="The number of sampling iterations to perform.",
     )
 
     config = parser.parse_args()
