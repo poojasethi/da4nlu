@@ -12,6 +12,7 @@ import torch
 from joblib import dump, load
 from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import SGDClassifier
+from sklearn.utils.class_weight import compute_class_weight
 from tqdm import tqdm
 
 from utils import timed
@@ -59,7 +60,6 @@ class Hyperparameters:
     loss = "hinge"
     max_training_iter = 10
     penalty = "elasticnet"
-    class_weight = "balanced"
 
 
 X_Y_Metadata_Sentences = Tuple[
@@ -96,11 +96,16 @@ def main():
         )
     else:
         logger.info(f"Starting round {iteration} of model training...")
+        classes = np.unique(Y_train)
+        balanced_class_weights = compute_class_weight('balanced', classes=classes, y=Y_train)
+        class_weight = dict(zip(classes, balanced_class_weights))
+        logging.info(f"Computed balanced class weights: {class_weight}...")
+        breakpoint()
         clf = SGDClassifier(
             loss=Hyperparameters.loss,
             max_iter=Hyperparameters.max_training_iter,
             penalty=Hyperparameters.penalty,
-            class_weight=Hyperparameters.class_weight,
+            class_weight=class_weight,
         )
         clf.fit(X_train, Y_train)
         clf.predict(X_train)
@@ -130,7 +135,7 @@ def main():
         config.sampling_frac,
         config.batch_size,
         config.output_dir,
-        config.num_sample_iter,
+        config.num_sampling_iter,
         test_data,
     )
 
