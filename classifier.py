@@ -44,10 +44,6 @@ class SamplingStrategy(Enum):
     LOW_CONFIDENCE_USE_PREDICTION = "low_confidence_use_prediction"
     LOW_CONFIDENCE_INVERSE_PREDICTION = "low_confidence_inverse_prediction"
 
-
-# Number of rounds of sampling to perform
-NUM_SAMPLING_ITER = 5
-
 SBERT_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 TRAIN_SPLIT = "train"
@@ -278,8 +274,9 @@ def sample_data(
             if is_self_learning_strategy(strategy):
                 if strategy == SamplingStrategy.LOW_CONFIDENCE_INVERSE_PREDICTION:
                     # For low confidence examples, set the gold label to the opposite 
-                    # of what the model predicted.
-                    sampled_data["Y"] = ~sampled_data["Y_predict"]
+                    # of what the model predicted. This only works in the binary 
+                    # classification case of course.
+                    sampled_data["Y"] = (~(sampled_data["Y_predict"].astype(bool))).astype(int)
                 else:
                     sampled_data["Y"] = sampled_data["Y_predict"]
 

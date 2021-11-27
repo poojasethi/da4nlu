@@ -3,7 +3,7 @@ Comparing self-learning vs. active learning for NLU domain adaptation
 
 Run experiment on 0.1% of the full dataset (< 10 min).
 ```
-python classifier.py -d civilcomments -f 0.001 -s 0.1 -o results_1/10_percent -n 5
+python classifier.py -d civilcomments -f 0.001 -s 0.1 -o results_1_10_percent -n 5
 ```
 
 Run experiment on 1% of the full dataset (~30 min).
