@@ -51,7 +51,7 @@ LOADER = "standard"
 
 LOSS = "hinge"
 PENALTY = "l2"
-MAX_TRAINING_ITER = 5
+MAX_TRAINING_ITER = 10 
 NUM_SAMPLING_ITER = 5
 
 X_Y_Metadata_Sentences = Tuple[
@@ -61,7 +61,7 @@ X_Y_Metadata_Sentences = Tuple[
 TRAIN_RESULTS = {s.value: {} for s in SamplingStrategy}
 TEST_RESULTS = {s.value: {} for s in SamplingStrategy}
 
-
+@timed
 def main():
     config = get_config()
     dataset = get_dataset(dataset=config.dataset, download=False)
@@ -368,15 +368,14 @@ def plot_results(
         for i, i_results in iterations.items():
             test_accuracies.append(i_results["acc_avg"])
 
-        breakpoint()
         plt.plot(iterations.keys(), test_accuracies, label=strategy)
 
     plt.title(f"{name.capitalize()} Accuracy vs. Iterations")
     plt.xlabel("Iteration #")
     plt.ylabel("Average Accuracy")
     plt.legend()
-    plt.show()
     plt.savefig(plot_path, bbox_inches="tight")
+    plt.show()
 
 
 def get_config():
