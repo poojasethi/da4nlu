@@ -42,6 +42,7 @@ class SamplingStrategy(Enum):
     HYBRID = "hybrid"  # Hybrid of self learning and active learning.
     HIGH_CONFIDENCE_USE_GOLD = "high_confidence_use_gold"
     LOW_CONFIDENCE_USE_PREDICTION = "low_confidence_use_prediction"
+    LOW_CONFIDENCE_INVERSE_PREDICTION = "low_confidence_inverse_prediction"
 
 
 # Number of rounds of sampling to perform
@@ -97,10 +98,11 @@ def main():
     else:
         logger.info(f"Starting round {iteration} of model training...")
         classes = np.unique(Y_train)
-        balanced_class_weights = compute_class_weight('balanced', classes=classes, y=Y_train)
+        balanced_class_weights = compute_class_weight(
+            "balanced", classes=classes, y=Y_train
+        )
         class_weight = dict(zip(classes, balanced_class_weights))
         logging.info(f"Computed balanced class weights: {class_weight}...")
-        breakpoint()
         clf = SGDClassifier(
             loss=Hyperparameters.loss,
             max_iter=Hyperparameters.max_training_iter,
@@ -274,7 +276,12 @@ def sample_data(
 
             # For self-learning, replace the gold label with the model prediction.
             if is_self_learning_strategy(strategy):
-                sampled_data["Y"] = sampled_data["Y_predict"]
+                if strategy == SamplingStrategy.LOW_CONFIDENCE_INVERSE_PREDICTION:
+                    # For low confidence examples, set the gold label to the opposite 
+                    # of what the model predicted.
+                    sampled_data["Y"] = ~sampled_data["Y_predict"]
+                else:
+                    sampled_data["Y"] = sampled_data["Y_predict"]
 
         examples = sampled_data[["X_sentences", "Y", "Y_decision", "Y_confidence"]]
         logger.info(
@@ -290,6 +297,7 @@ def is_self_learning_strategy(strategy):
     return (
         strategy == SamplingStrategy.SELF_LEARNIG
         or strategy == SamplingStrategy.LOW_CONFIDENCE_USE_PREDICTION
+        or strategy == SamplingStrategy.LOW_CONFIDENCE_INVERSE_PREDICTION
     )
 
 
@@ -394,7 +402,7 @@ def plot_results(
     plt.title(f"{name.capitalize()} Accuracy vs. Iterations")
     plt.xlabel("Iteration #")
     plt.ylabel("Average Accuracy")
-    plt.legend()
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 0.5))
     plt.savefig(plot_path, bbox_inches="tight")
     plt.show()
 
