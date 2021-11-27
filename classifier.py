@@ -4,7 +4,7 @@ import os
 import sys
 from enum import Enum
 from re import I
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,10 +16,10 @@ from tqdm import tqdm
 
 from utils import timed
 from wilds import get_dataset
-from wilds.common.data_loaders import (DataLoader, get_eval_loader,
-                                       get_train_loader)
+from wilds.common.data_loaders import DataLoader, get_eval_loader, get_train_loader
 from wilds.datasets.wilds_dataset import WILDSDataset
 
+import matplotlib.pyplot as plt
 
 """
 This script trains a binary classification model on the Civil Comments WILDS dataset.
@@ -54,7 +54,12 @@ PENALTY = "l2"
 MAX_TRAINING_ITER = 5
 NUM_SAMPLING_ITER = 5
 
-X_Y_Metadata_Sentences = Tuple[List[List[float]], List[int], List[List[int]], Optional[List[str]]]
+X_Y_Metadata_Sentences = Tuple[
+    List[List[float]], List[int], List[List[int]], Optional[List[str]]
+]
+
+TRAIN_RESULTS = {s.value: {} for s in SamplingStrategy}
+TEST_RESULTS = {s.value: {} for s in SamplingStrategy}
 
 
 def main():
@@ -87,15 +92,22 @@ def main():
         clf.predict(X_train)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         save_model(clf, model_path)
-        save_results(
+        results_dict = save_results(
             clf,
             results_path,
             {
-                "train": (X_train, Y_train, X_train_metadata, X_train_sentences),
-                "test": test_data,
+                TRAIN_SPLIT: (X_train, Y_train, X_train_metadata, X_train_sentences),
+                TEST_SPLIT: test_data,
             },
             dataset,
         )
+        for name, results in results_dict.items():
+            if name == TRAIN_SPLIT:
+                for _, iterations in TRAIN_RESULTS.items():
+                    iterations[0] = results
+            elif name == TEST_SPLIT:
+                for _, iterations in TEST_RESULTS.items():
+                    iterations[0] = results
 
     # Perform online sampling and retraining.
     sample_data_and_retrain(
@@ -106,6 +118,11 @@ def main():
         config.output_dir,
         test_data,
     )
+
+    # Plot results.
+    for name, results in {TRAIN_SPLIT: TRAIN_RESULTS, TEST_SPLIT: TEST_RESULTS}.items():
+        plot_path = f"{config.output_dir}/{name}_results.png"
+        plot_results(name, results, plot_path)
 
 
 def sample_data_and_retrain(
@@ -125,7 +142,12 @@ def sample_data_and_retrain(
         val_loader = get_eval_loader(LOADER, val_data, batch_size=batch_size)
         X_val, Y_val, X_val_metadata, X_val_sentences = prepare_data(val_loader)
         candidate_pool = pd.DataFrame(
-            {"X": X_val, "Y": Y_val, "X_metadata": X_val_metadata, "X_sentences": X_val_sentences}
+            {
+                "X": X_val,
+                "Y": Y_val,
+                "X_metadata": X_val_metadata,
+                "X_sentences": X_val_sentences,
+            }
         )
 
         for strategy in SamplingStrategy:
@@ -148,15 +170,24 @@ def sample_data_and_retrain(
                 )
 
                 clf, sampled_data = run_sampling_strategy(
-                    strategy, candidate_pool, sampling_frac, previous_model_path, data_path
+                    strategy,
+                    candidate_pool,
+                    sampling_frac,
+                    previous_model_path,
+                    data_path,
                 )
                 save_model(clf, model_path)
-                save_results(
+                results_dict = save_results(
                     clf,
                     results_path,
-                    {"train": sampled_data, "test": test_data},
+                    {TRAIN_SPLIT: sampled_data, TEST_SPLIT: test_data},
                     dataset,
                 )
+                for name, results in results_dict.items():
+                    if name == TRAIN_SPLIT:
+                        TRAIN_RESULTS[strategy.value][i] = results
+                    elif name == TEST_SPLIT:
+                        TEST_RESULTS[strategy.value][i] = results
 
 
 @timed
@@ -175,9 +206,13 @@ def run_sampling_strategy(
         sampled_data["X"],
         sampled_data["Y"],
         sampled_data["X_metadata"],
-        sampled_data["X_sentences"]
+        sampled_data["X_sentences"],
     )
-    X_sampled, Y_sampled, X_sampled_metadata = X_sampled.tolist(), Y_sampled.tolist(), X_sampled_metadata.tolist()
+    X_sampled, Y_sampled, X_sampled_metadata = (
+        X_sampled.tolist(),
+        Y_sampled.tolist(),
+        X_sampled_metadata.tolist(),
+    )
     clf.partial_fit(X_sampled, Y_sampled)
     return clf, (X_sampled, Y_sampled, X_sampled_metadata, X_sentences)
 
@@ -189,7 +224,7 @@ def sample_data(
     sampling_frac: float,
     clf: SGDClassifier,
     data_path: str,
-    write_data: bool=True,
+    write_data: bool = True,
 ) -> pd.DataFrame:
     if strategy == SamplingStrategy.RANDOM:
         return candidate_pool.sample(frac=sampling_frac)
@@ -209,20 +244,21 @@ def sample_data(
             tail = candidate_info.tail(n=(num_to_sample // 2)).copy(deep=True)
             head["Y"] = head["Y_predict"]
             sampled_data = pd.concat([head, tail])
-        else: 
+        else:
             # Return sampled data.
             if is_high_confidence_strategy(strategy):
                 sampled_data = candidate_info.head(n=num_to_sample).copy(deep=True)
             else:
                 sampled_data = candidate_info.tail(n=num_to_sample).copy(deep=True)
-            
+
             # For self-learning, replace the gold label with the model prediction.
             if is_self_learning_strategy(strategy):
                 sampled_data["Y"] = sampled_data["Y_predict"]
 
-
         examples = sampled_data[["X_sentences", "Y", "Y_decision", "Y_confidence"]]
-        logger.info(f"Sampled some data! Here are some examples:\n {examples.head(n=10)}")
+        logger.info(
+            f"Sampled some data! Here are some examples:\n {examples.head(n=10)}"
+        )
         if write_data:
             examples.to_csv(data_path)
 
@@ -244,7 +280,9 @@ def is_high_confidence_strategy(strategy):
 
 
 @timed
-def prepare_data(data_loader: DataLoader, embed_input: bool = True) -> X_Y_Metadata_Sentences:
+def prepare_data(
+    data_loader: DataLoader, embed_input: bool = True
+) -> X_Y_Metadata_Sentences:
     X_sentences = []
     Y = []
     X_metadata = []
@@ -282,9 +320,13 @@ def save_results(
     results_path: str,
     eval_sets: Dict[str, X_Y_Metadata_Sentences],
     dataset: WILDSDataset,
-) -> None:
+) -> Dict[str, Dict[str, Any]]:
+    results_dict = {}
     for name, data in eval_sets.items():
-        calculate_and_save_accuracy(clf, results_path, name, data, dataset)
+        results_dict[name] = calculate_and_save_accuracy(
+            clf, results_path, name, data, dataset
+        )
+    return results_dict
 
 
 def calculate_and_save_accuracy(
@@ -293,7 +335,7 @@ def calculate_and_save_accuracy(
     name: str,
     eval_data: X_Y_Metadata_Sentences,
     dataset: WILDSDataset,
-) -> None:
+) -> Dict[str, Any]:
     X_eval, Y_eval, X_eval_metadata, _ = eval_data
     # Note: Because we do not necessarily need a calibrated probability but just a
     # confidence score, calling predict here should be ok.
@@ -303,7 +345,7 @@ def calculate_and_save_accuracy(
     Y_eval_tensor = torch.tensor(Y_eval)
     X_eval_metadata_tensor = torch.stack([torch.tensor(x) for x in X_eval_metadata])
 
-    _, results_str = dataset.eval(
+    results, results_str = dataset.eval(
         Y_predict_tensor, Y_eval_tensor, X_eval_metadata_tensor
     )
     logger.info(results_str)
@@ -314,6 +356,27 @@ def calculate_and_save_accuracy(
         fh.write(f"Results for: {name}\n")
         fh.write(results_str)
         fh.write(f"{'*' * 30}\n")
+
+    return results
+
+
+def plot_results(
+    name: str, results: Dict[str, Dict[int, Dict[str, Any]]], plot_path: str
+):
+    for strategy, iterations in results.items():
+        test_accuracies = []
+        for i, i_results in iterations.items():
+            test_accuracies.append(i_results["acc_avg"])
+
+        breakpoint()
+        plt.plot(iterations.keys(), test_accuracies, label=strategy)
+
+    plt.title(f"{name.capitalize()} Accuracy vs. Iterations")
+    plt.xlabel("Iteration #")
+    plt.ylabel("Average Accuracy")
+    plt.legend()
+    plt.show()
+    plt.savefig(plot_path, bbox_inches="tight")
 
 
 def get_config():
