@@ -85,13 +85,14 @@ def main():
         clf = SGDClassifier(loss=LOSS, penalty=PENALTY, max_iter=MAX_TRAINING_ITER)
         clf.fit(X_train, Y_train)
         clf.predict(X_train)
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         save_model(clf, model_path)
         save_results(
             clf,
             results_path,
             {
                 "train": (X_train, Y_train, X_train_metadata, X_train_sentences),
-                "test": (X_test, Y_test, X_test_metadata, X_test_sentences),
+                "test": test_data,
             },
             dataset,
         )
@@ -103,7 +104,7 @@ def main():
         config.sampling_frac,
         config.batch_size,
         config.output_dir,
-        (X_test, Y_test, X_test_metadata),
+        test_data,
     )
 
 
@@ -282,7 +283,6 @@ def save_results(
     eval_sets: Dict[str, X_Y_Metadata_Sentences],
     dataset: WILDSDataset,
 ) -> None:
-    breakpoint()
     for name, data in eval_sets.items():
         calculate_and_save_accuracy(clf, results_path, name, data, dataset)
 
