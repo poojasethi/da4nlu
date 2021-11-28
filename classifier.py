@@ -26,7 +26,11 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
 """
-This script trains a binary classification model on the Civil Comments WILDS dataset.
+This script trains a text classification model using the two NLP datasets available
+on WILDS: https://wilds.stanford.edu/datasets/
+
+Namely, the CivilComments and Amazon datasets.
+
 It trains an initial "seed" model, then tries to improve the model in an online setting,
 by either sampling using self-learning, uncertainty-based active learning, or one of 
 the other sampling strategies defined here.
