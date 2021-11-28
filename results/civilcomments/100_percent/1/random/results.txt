@@ -1,0 +1,24 @@
+Results for: train
+Average acc: 0.750
+  male                   acc on non_toxic: 0.628 (n =    427)    acc on toxic: 0.797 (n =     79) 
+  female                 acc on non_toxic: 0.648 (n =    542)    acc on toxic: 0.812 (n =     64) 
+  LGBTQ                  acc on non_toxic: 0.413 (n =     92)    acc on toxic: 0.824 (n =     34) 
+  christian              acc on non_toxic: 0.853 (n =    401)    acc on toxic: 0.660 (n =     47) 
+  muslim                 acc on non_toxic: 0.383 (n =    133)    acc on toxic: 0.895 (n =     57) 
+  other_religions        acc on non_toxic: 0.647 (n =     68)    acc on toxic: 0.778 (n =     18) 
+  black                  acc on non_toxic: 0.360 (n =    100)    acc on toxic: 0.924 (n =     66) 
+  white                  acc on non_toxic: 0.305 (n =    197)    acc on toxic: 0.919 (n =     86) 
+Worst-group acc: 0.305
+******************************
+Results for: test
+Average acc: 0.739
+  male                   acc on non_toxic: 0.624 (n =  12092)    acc on toxic: 0.841 (n =   2203) 
+  female                 acc on non_toxic: 0.649 (n =  14179)    acc on toxic: 0.830 (n =   2270) 
+  LGBTQ                  acc on non_toxic: 0.390 (n =   3210)    acc on toxic: 0.878 (n =   1216) 
+  christian              acc on non_toxic: 0.767 (n =  12101)    acc on toxic: 0.782 (n =   1260) 
+  muslim                 acc on non_toxic: 0.412 (n =   5355)    acc on toxic: 0.899 (n =   1627) 
+  other_religions        acc on non_toxic: 0.599 (n =   2980)    acc on toxic: 0.846 (n =    520) 
+  black                  acc on non_toxic: 0.301 (n =   3335)    acc on toxic: 0.919 (n =   1537) 
+  white                  acc on non_toxic: 0.269 (n =   5723)    acc on toxic: 0.942 (n =   2246) 
+Worst-group acc: 0.269
+******************************
