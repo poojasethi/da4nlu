@@ -1,5 +1,2 @@
 1_10_percent/**/*.csv
-1_percent/**/*.csv
 100_percent/**/*.csv
-# Show sampled data for the last round.
-!100_percent/5/*/*.csv
