@@ -5,6 +5,7 @@ import sys
 from enum import Enum
 from re import I
 from typing import Any, Dict, List, Optional, Tuple
+import heapq
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ from joblib import dump, load
 from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import SGDClassifier
 from sklearn.utils.class_weight import compute_class_weight
+from torch._C import Value
 from tqdm import tqdm
 
 from utils import timed
@@ -44,6 +46,7 @@ class SamplingStrategy(Enum):
     LOW_CONFIDENCE_USE_PREDICTION = "low_confidence_use_prediction"
     LOW_CONFIDENCE_INVERSE_PREDICTION = "low_confidence_inverse_prediction"
 
+
 SBERT_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 TRAIN_SPLIT = "train"
@@ -55,7 +58,7 @@ LOADER = "standard"
 @dataclass
 class Hyperparameters:
     loss = "hinge"
-    max_training_iter = 10
+    max_training_iter = 1000
     penalty = "elasticnet"
 
 
@@ -250,9 +253,20 @@ def sample_data(
     else:
         candidate_info = candidate_pool.copy(deep=True)
         X = candidate_pool["X"].tolist()
+
+        num_classes = len(clf.classes_)
+
         candidate_info["Y_predict"] = clf.predict(X)
-        candidate_info["Y_decision"] = clf.decision_function(X)
-        candidate_info["Y_confidence"] = abs(candidate_info["Y_decision"])
+        candidate_info["Y_decision"] = (
+            clf.decision_function(X)
+            if num_classes == 2
+            else clf.decision_function(X).tolist()
+        )
+        candidate_info["Y_confidence"] = (
+            abs(candidate_info["Y_decision"])
+            if num_classes == 2
+            else candidate_info["Y_decision"].apply(max)
+        )
 
         # Sort the sampled data by confidence in descending order (high confidence is at the top).
         candidate_info.sort_values("Y_confidence", ascending=False, inplace=True)
@@ -273,10 +287,18 @@ def sample_data(
             # For self-learning, replace the gold label with the model prediction.
             if is_self_learning_strategy(strategy):
                 if strategy == SamplingStrategy.LOW_CONFIDENCE_INVERSE_PREDICTION:
-                    # For low confidence examples, set the gold label to the opposite 
-                    # of what the model predicted. This only works in the binary 
-                    # classification case of course.
-                    sampled_data["Y"] = (~(sampled_data["Y_predict"].astype(bool))).astype(int)
+                    if num_classes == 2:
+                        # For low confidence examples, set the gold label to the opposite
+                        # of what the model predicted. This only works in the binary
+                        # classification case of course.
+                        sampled_data["Y"] = (
+                            ~(sampled_data["Y_predict"].astype(bool))
+                        ).astype(int)
+                    else:
+                        # Otherwise, take the label of the second highest class.
+                        sampled_data["Y"] = candidate_info["Y_decision"].apply(
+                            find_nth_highest_index
+                        )
                 else:
                     sampled_data["Y"] = sampled_data["Y_predict"]
 
@@ -288,6 +310,21 @@ def sample_data(
             examples.to_csv(data_path)
 
         return sampled_data
+
+
+def find_nth_highest_index(input: List[int], n: int = 2) -> int:
+    """
+    Finds the nth highest item in a list and returns its index.
+    Note that n is 1-indexed here, e.g. n=1 would return the 1st largest element.
+    """
+    heap = []  # Create a min-heap of size n.
+    for idx, value in enumerate(input):
+        if not heap or len(heap) < n:
+            heapq.heappush(heap, (value, idx))
+        elif value > heap[0][0]:
+            heapq.heappushpop(heap, (value, idx))
+    value, idx = heapq.heappop(heap)
+    return idx
 
 
 def is_self_learning_strategy(strategy):
