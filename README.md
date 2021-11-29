@@ -33,7 +33,7 @@ Run experiment on 1% of the full dataset (~1 hour).
 python classifier.py -d amazon -f 0.1 -s 0.1 -b 100 -o results/amazon/1_percent -n 5
 ```
 
-Run experiment on 100% of the full dataset (6-7 hrs).
+Run experiment on 10% of the full dataset (? hrs).
 ```
 python classifier.py -d amazon -f 1 -s 0.1 -b 10000 -o results/amazon/100_percent -n 5
 ```

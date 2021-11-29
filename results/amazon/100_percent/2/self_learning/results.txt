@@ -1,0 +1,10 @@
+Results for: train
+Average acc: 0.972
+10th percentile acc: 0.875
+Worst-group acc: 0.000
+******************************
+Results for: test
+Average acc: 0.469
+10th percentile acc: 0.187
+Worst-group acc: 0.027
+******************************
